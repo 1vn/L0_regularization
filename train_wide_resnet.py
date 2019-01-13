@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 import torch.backends.cudnn as cudnn
+import torch.nn.functional as F
 
 from models import L0WideResNet, TDWideResNet
 from dataloaders import cifar10, cifar100
@@ -130,6 +131,8 @@ def main():
             N=50000,
             beta_ema=args.beta_ema,
             weight_decay=args.weight_decay,
+            dropout=0.5,
+            dropout_botk=0.5,
         )
 
     print(
@@ -183,14 +186,10 @@ def main():
 
     # define loss function (criterion) and optimizer
     def loss_function(output, target_var, model):
-        loss = loglike(output, target_var)
         # print("loss:", loss)
-        if args.model == "TDWideResNet":
-            return loss
-        reg = model.regularization() if not args.multi_gpu else model.module.regularization()
-        print("output:", output)
-        print("reg:", reg)
-        total_loss = loss + reg
+        loss = loglike(output, target_var)
+        # reg = model.regularization() if not args.multi_gpu else model.module.regularization()
+        total_loss = loss
         if torch.cuda.is_available():
             total_loss = total_loss.cuda()
         return total_loss

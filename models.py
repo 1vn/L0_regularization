@@ -306,16 +306,16 @@ class L0WideResNet(nn.Module):
 
 class TDBasicBlock(nn.Module):
     def __init__(self, in_planes, out_planes, stride, droprate_init=0.0, weight_decay=0., lamba=0.01, local_rep=False,
-                 temperature=2./3.):
+                 temperature=2./3., dropout=0.5, dropout_botk=0.5):
         super(TDBasicBlock, self).__init__()
         self.bn1 = nn.BatchNorm2d(in_planes, eps=0.001, momentum=0.997)
         self.conv1 = TDConv2d(in_planes, out_planes, kernel_size=3, stride=1, padding=1, bias=False,
                               droprate_init=droprate_init, weight_decay=weight_decay / (1 - 0.3), local_rep=local_rep,
-                              lamba=lamba, temperature=temperature)
+                              lamba=lamba, temperature=temperature, dropout=dropout, dropout_botk=dropout_botk)
 
         self.bn2 = nn.BatchNorm2d(out_planes, eps=0.001, momentum=0.997)
         self.conv2 = TDConv2d(out_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False,
-                               weight_decay=weight_decay)
+                               weight_decay=weight_decay, dropout=dropout, dropout_botk=dropout_botk)
 
         self.equalInOut = (in_planes == out_planes)
         self.convShortcut = (not self.equalInOut) and \
@@ -346,7 +346,7 @@ class TDBasicBlock(nn.Module):
 
 class TDWideResNet(nn.Module):
     def __init__(self, depth, num_classes, widen_factor=1, droprate_init=0.3, N=50000, beta_ema=0.99,
-                 weight_decay=5e-4, local_rep=False, lamba=0.01, temperature=2./3.):
+                 weight_decay=5e-4, local_rep=False, lamba=0.01, temperature=2./3., dropout=0.5, dropout_botk=0.5):
         super(TDWideResNet, self).__init__()
         nChannels = [16, 16*widen_factor, 32*widen_factor, 64*widen_factor]
         assert((depth - 4) % 6 == 0)
@@ -355,7 +355,7 @@ class TDWideResNet(nn.Module):
         self.beta_ema = beta_ema
         block = TDBasicBlock
 
-        self.weight_decay = N * weight_decay
+        self.weight_decay = 0.001
         self.lamba = lamba
 
         # 1st conv before any network block
@@ -387,28 +387,25 @@ class TDWideResNet(nn.Module):
 
     def forward(self, x):
         out = self.conv1(x)
-        # print("covn1 out:", out)
+        #print("covn1 out:", out)
         out = self.block1(out)
-        # print("block1 out:", out)
+        #print("block1 out:", out)
         out = self.block2(out)
-        # print("block2 out:", out)
+        #print("block2 out:", out)
         out = self.block3(out)
-        # print("block3 out:", out)
+        #print("block3 out:", out)
         out = F.relu(self.bn(out))
-        # print("relu out:", out)
+        #print("relu out:", out)
         out = F.avg_pool2d(out, 8)
-        # print("pooling:", out)
+        #print("pooling:", out)
         out = out.view(out.size(0), -1)
-        # print("resnet forward out:", out)
+        #print("resnet forward out:", out)
         return self.fcout(out)
 
     def regularization(self):
         regularization = 0.
         for layer in self.layers:
             regularization += layer.regularization()
-        for bnw in self.bn_params:
-            if self.weight_decay > 0:
-                regularization += (self.weight_decay / self.N) * .5 * torch.sum(bnw.pow(2))
         if torch.cuda.is_available():
             regularization = regularization.cuda()
         return regularization

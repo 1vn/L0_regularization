@@ -388,6 +388,10 @@ class TDConv2d(Module):
             raise ValueError("in_channels must be divisible by groups")
         if out_channels % groups != 0:
             raise ValueError("out_channels must be divisible by groups")
+        self.weight_decay = weight_decay
+        self.floatTensor = (
+            torch.FloatTensor if not torch.cuda.is_available() else torch.cuda.FloatTensor
+        )
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = pair(kernel_size)
@@ -396,39 +400,44 @@ class TDConv2d(Module):
         self.dilation = pair(dilation)
         self.output_padding = pair(0)
         self.groups = groups
-        self.floatTensor = (
-            torch.FloatTensor if not torch.cuda.is_available() else torch.cuda.FloatTensor
-        )
-        self.use_bias = False
-        self.weights = Parameter(
+        self.weight = Parameter(
             torch.Tensor(out_channels, in_channels // groups, *self.kernel_size)
         )
-        self.input_shape = None
+        if bias:
+            self.bias = Parameter(torch.Tensor(out_channels))
+        else:
+            self.register_parameter("bias", None)
 
         self.dropout = dropout
         self.dropout_botk = dropout_botk
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
-            self.use_bias = True
 
         self.reset_parameters()
+        self.input_shape = None
+        print(self)
+
         print(self)
 
     def reset_parameters(self):
-        torch.nn.init.uniform_(self.weights)
+        init.kaiming_normal(self.weight, mode="fan_in")
 
-        if self.use_bias:
-            self.bias.data.fill_(0)
+        if self.bias is not None:
+            self.bias.data.normal_(0, 1e-2)
 
-    def constrain_parameters(self, **kwargs):
+    def constrain_parameters(self, thres_std=1.0):
         pass
 
+    def _reg_w(self, **kwargs):
+        logpw = -torch.sum(self.weight_decay * 0.5 * (self.weight.pow(2)))
+        logpb = 0
+        if self.bias is not None:
+            logpb = -torch.sum(self.weight_decay * 0.5 * (self.bias.pow(2)))
+        return logpw + logpb
+
     def regularization(self):
-        return 0
+        return self._reg_w()
 
     def count_expected_flops_and_l0(self):
-        """Measures the expected floating point operations (FLOPs) and the expected L0 norm"""
-        ppos = torch.sum(1 - self.cdf_qz(0))
+        ppos = self.out_channels
         n = self.kernel_size[0] * self.kernel_size[1] * self.in_channels  # vector_length
         flops_per_instance = n + (n - 1)  # (n: multiplications and n-1: additions)
 
@@ -443,12 +452,12 @@ class TDConv2d(Module):
         expected_flops = flops_per_filter * ppos  # multiply with number of filters
         expected_l0 = n * ppos
 
-        if self.use_bias:
+        if self.bias is not None:
             # since the gate is applied to the output we also reduce the bias computation
             expected_flops += num_instances_per_filter * ppos
             expected_l0 += ppos
 
-        return expected_flops.data[0], expected_l0.data[0]
+        return expected_flops, expected_l0
 
     def targeted_dropout(self, w):
         drop_rate = self.dropout
@@ -479,14 +488,11 @@ class TDConv2d(Module):
         return w
 
     def forward(self, input_):
-        # print("td_conv weights: ", self.weights)
         if self.input_shape is None:
             self.input_shape = input_.size()
-        b = None if not self.use_bias else self.bias
-        # weights = self.weights
-        weights = self.targeted_dropout(self.weights)
+        weight = self.targeted_dropout(self.weight)
         output = F.conv2d(
-            input_, weights, None, self.stride, self.padding, self.dilation, self.groups
+            input_, weight, self.bias, self.stride, self.padding, self.dilation, self.groups
         )
         return output
 
@@ -503,7 +509,5 @@ class TDConv2d(Module):
             s += ", output_padding={output_padding}"
         if self.groups != 1:
             s += ", groups={groups}"
-        if not self.use_bias:
-            s += ", bias=False"
         s += ")"
         return s.format(name=self.__class__.__name__, **self.__dict__)
