@@ -206,6 +206,13 @@ class NetworkBlock(nn.Module):
     def forward(self, x):
         return self.layer(x)
 
+    def prune(self, botk):
+        new_layers = []
+        for layer in self.layer:
+            layer.prune(botk)
+            new_layers.append(layer)
+        self.layer = nn.Sequential(*new_layers)
+
 
 class L0WideResNet(nn.Module):
     def __init__(self, depth, num_classes, widen_factor=1, droprate_init=0.3, N=50000, beta_ema=0.99,
@@ -322,6 +329,10 @@ class TDBasicBlock(nn.Module):
                             MAPConv2d(in_planes, out_planes, kernel_size=1, stride=stride, padding=0, bias=False,
                                       weight_decay=weight_decay) or None
 
+    def prune(self, botk):
+        self.conv1.prune(botk)
+        self.conv2.prune(botk)
+
     def forward(self, x):
         # print("block pre relu: ", x)
         if not self.equalInOut:
@@ -401,6 +412,11 @@ class TDWideResNet(nn.Module):
         out = out.view(out.size(0), -1)
         #print("resnet forward out:", out)
         return self.fcout(out)
+
+    def prune(self, botk):
+        self.block1.prune(botk)
+        self.block2.prune(botk)
+        self.block3.prune(botk)
 
     def regularization(self):
         regularization = 0.

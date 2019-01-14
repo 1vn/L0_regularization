@@ -70,6 +70,7 @@ parser.add_argument("--dataset", choices=["c10", "c100"], default="c10")
 parser.add_argument("--local_rep", action="store_true")
 parser.add_argument("--epoch_drop", nargs="*", type=int, default=(60, 120, 160))
 parser.add_argument("--temp", type=float, default=2.0 / 3.0)
+parser.add_argument("--prune", type=bool, default=False)
 parser.set_defaults(bottleneck=True)
 parser.set_defaults(augment=True)
 parser.set_defaults(tensorboard=True)
@@ -197,6 +198,15 @@ def main():
     lr_schedule = lr_scheduler.MultiStepLR(
         optimizer, milestones=args.epoch_drop, gamma=args.lr_decay_ratio
     )
+
+    if args.prune:
+        for i in range(10):
+            botk = i * 0.1
+            model.prune(botk)
+            prec1 = validate(val_loader, model, loss_function, 1)
+            model.load_state_dict(checkpoint["state_dict"])
+            print(botk, prec1)
+        return
 
     for epoch in range(args.start_epoch, args.epochs):
         time_glob = time.time()
@@ -372,17 +382,17 @@ def validate(val_loader, model, criterion, epoch):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
-            print(
-                "Test: [{0}/{1}]\t"
-                "Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
-                "Loss {loss.val:.4f} ({loss.avg:.4f})\t"
-                "Err@1 {top1.val:.3f} ({top1.avg:.3f})".format(
-                    i, len(val_loader), batch_time=batch_time, loss=losses, top1=top1
-                )
-            )
+    #     if i % args.print_freq == 0:
+    #         print(
+    #             "Test: [{0}/{1}]\t"
+    #             "Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
+    #             "Loss {loss.val:.4f} ({loss.avg:.4f})\t"
+    #             "Err@1 {top1.val:.3f} ({top1.avg:.3f})".format(
+    #                 i, len(val_loader), batch_time=batch_time, loss=losses, top1=top1
+    #             )
+    #         )
 
-    print(" * Err@1 {top1.avg:.3f}".format(top1=top1))
+    # print(" * Err@1 {top1.avg:.3f}".format(top1=top1))
     if not args.multi_gpu:
         if model.beta_ema > 0:
             model.load_params(old_params)

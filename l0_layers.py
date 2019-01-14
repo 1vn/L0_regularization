@@ -401,7 +401,7 @@ class TDConv2d(Module):
         self.output_padding = pair(0)
         self.groups = groups
         self.weight = Parameter(
-            torch.Tensor(out_channels, in_channels // groups, *self.kernel_size)
+            self.floatTensor(out_channels, in_channels // groups, *self.kernel_size)
         )
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
@@ -486,6 +486,19 @@ class TDConv2d(Module):
         w = w.view(w_shape)
         # print("w: ", w)
         return w
+
+    def prune(self, botk):
+        w = self.weight
+        w_shape = self.weight.size()
+        w = w.view(-1, w_shape[-1])
+        norm = w.abs()
+        idx = int(botk * float(w.size()[0]))
+        norm_sorted, _ = norm.sort(dim=1)
+        threshold = norm_sorted[idx]
+        mask = norm < threshold[None, :]
+        w = (1.0 - mask.float()) * w
+        w = w.view(w_shape)
+        self.weight = torch.nn.Parameter(w)
 
     def forward(self, input_):
         if self.input_shape is None:
