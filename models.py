@@ -175,7 +175,9 @@ class BasicBlock(nn.Module):
         self.convShortcut = (not self.equalInOut) and \
                             MAPConv2d(in_planes, out_planes, kernel_size=1, stride=stride, padding=0, bias=False,
                                       weight_decay=weight_decay) or None
-
+    def prune(self, botk):
+        self.conv1.prune(botk)
+        
     def forward(self, x):
         if not self.equalInOut:
             x = F.relu(self.bn1(x))
@@ -282,6 +284,11 @@ class L0WideResNet(nn.Module):
         if torch.cuda.is_available():
             regularization = regularization.cuda()
         return regularization
+    
+    def prune(self, botk):
+        self.block1.prune(botk)
+        self.block2.prune(botk)
+        self.block3.prune(botk)
 
     def get_exp_flops_l0(self):
         expected_flops, expected_l0 = 0., 0.

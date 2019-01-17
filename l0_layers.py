@@ -314,11 +314,31 @@ class L0Conv2d(Module):
         )
         return F.hardtanh(z, min_val=0, max_val=1) * self.weights
 
+    def prune(self, botk):
+        qz = self.qz_loga
+        qz_shape = qz.size()
+
+        if len(qz_shape) == 4:
+            qz = qz.view(-1, qz_shape[-1])
+
+        idx = int(botk * float(qz.size()[0]))
+        qz_sorted, _ = qz.sort(dim=0)
+        threshold = qz_sorted[idx : idx + 1]
+        mask = qz >= threshold
+        qz = mask.float() * qz
+        self.qz_loga = torch.nn.Parameter(qz.view(qz_shape))
+        
+        #apply to weights
+        w = self.weights
+        w = w * qz.view(self.dim_z, 1, 1, 1)
+        self.weights = torch.nn.Parameter(w)
+
     def forward(self, input_):
         if self.input_shape is None:
             self.input_shape = input_.size()
         b = None if not self.use_bias else self.bias
         if self.local_rep or not self.training:
+            print(np.count_nonzero(self.weights.cpu().detach().numpy()) / np.prod(self.weights.size()))
             output = F.conv2d(
                 input_, self.weights, b, self.stride, self.padding, self.dilation, self.groups
             )
@@ -470,7 +490,7 @@ class TDConv2d(Module):
 
         norm = w.abs()
         idx = int(targ_perc * float(w.size()[0]))
-        norm_sorted, _ = norm.sort(dim=1)
+        norm_sorted, _ = norm.sort(dim=0)
         threshold = norm_sorted[idx]
         mask = norm < threshold[None, :]
 
@@ -484,19 +504,18 @@ class TDConv2d(Module):
         mask = dropout_mask & mask
         w = (1.0 - mask.float()) * w
         w = w.view(w_shape)
-        # print("w: ", w)
         return w
 
     def prune(self, botk):
         w = self.weight
-        w_shape = self.weight.size()
+        w_shape = w.size()
         w = w.view(-1, w_shape[-1])
         norm = w.abs()
         idx = int(botk * float(w.size()[0]))
-        norm_sorted, _ = norm.sort(dim=1)
-        threshold = norm_sorted[idx]
-        mask = norm < threshold[None, :]
-        w = (1.0 - mask.float()) * w
+        norm_sorted, _ = norm.sort(dim=0)
+        threshold = norm_sorted[idx : idx + 1]
+        mask = norm >= threshold
+        w = mask.float() * w
         w = w.view(w_shape)
         self.weight = torch.nn.Parameter(w)
 

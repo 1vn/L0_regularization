@@ -71,6 +71,8 @@ parser.add_argument("--local_rep", action="store_true")
 parser.add_argument("--epoch_drop", nargs="*", type=int, default=(60, 120, 160))
 parser.add_argument("--temp", type=float, default=2.0 / 3.0)
 parser.add_argument("--prune", type=bool, default=False)
+parser.add_argument("--dropout", type=float, default=0.5)
+parser.add_argument("--dropout_botk", type=float, default=0.5)
 parser.set_defaults(bottleneck=True)
 parser.set_defaults(augment=True)
 parser.set_defaults(tensorboard=True)
@@ -132,8 +134,8 @@ def main():
             N=50000,
             beta_ema=args.beta_ema,
             weight_decay=args.weight_decay,
-            dropout=0.5,
-            dropout_botk=0.5,
+            dropout=args.dropout,
+            dropout_botk=args.dropout_botk,
         )
 
     print(
@@ -245,6 +247,10 @@ def main():
                 if model.module.beta_ema > 0:
                     state["avg_params"] = model.module.avg_param
                     state["steps_ema"] = model.module.steps_ema
+
+        if args.model == "TDWideResNet":
+            state["dropout"] = args.dropout
+            state["dropout_botk"] = args.dropout_botk
 
         save_checkpoint(state, is_best, args.name)
     print("Best error: ", best_prec1)
