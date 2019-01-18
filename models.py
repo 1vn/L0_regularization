@@ -328,8 +328,8 @@ class TDBasicBlock(nn.Module):
                               lamba=lamba, temperature=temperature, dropout=dropout, dropout_botk=dropout_botk)
 
         self.bn2 = nn.BatchNorm2d(out_planes, eps=0.001, momentum=0.997)
-        self.conv2 = TDConv2d(out_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False,
-                               weight_decay=weight_decay, dropout=dropout, dropout_botk=dropout_botk)
+        self.conv2 = MAPConv2d(out_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False,
+                               weight_decay=weight_decay)
 
         self.equalInOut = (in_planes == out_planes)
         self.convShortcut = (not self.equalInOut) and \
@@ -338,7 +338,6 @@ class TDBasicBlock(nn.Module):
 
     def prune(self, botk):
         self.conv1.prune(botk)
-        self.conv2.prune(botk)
 
     def forward(self, x):
         # print("block pre relu: ", x)

@@ -217,6 +217,7 @@ class L0Conv2d(Module):
         self.dim_z = out_channels
         self.input_shape = None
         self.local_rep = local_rep
+        self.prune_rate = 0.0
 
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
@@ -315,32 +316,38 @@ class L0Conv2d(Module):
         return F.hardtanh(z, min_val=0, max_val=1) * self.weights
 
     def prune(self, botk):
+        self.prune_rate = botk
+
+    def prune_weights(self, w):
         qz = self.qz_loga
         qz_shape = qz.size()
 
         if len(qz_shape) == 4:
             qz = qz.view(-1, qz_shape[-1])
 
-        idx = int(botk * float(qz.size()[0]))
+        idx = int(self.prune_rate * float(qz.size()[0]))
         qz_sorted, _ = qz.sort(dim=0)
         threshold = qz_sorted[idx : idx + 1]
         mask = qz >= threshold
         qz = mask.float() * qz
         self.qz_loga = torch.nn.Parameter(qz.view(qz_shape))
-        
-        #apply to weights
-        w = self.weights
+
+        # apply to weights
         w = w * qz.view(self.dim_z, 1, 1, 1)
-        self.weights = torch.nn.Parameter(w)
+        return torch.nn.Parameter(w)
 
     def forward(self, input_):
         if self.input_shape is None:
             self.input_shape = input_.size()
         b = None if not self.use_bias else self.bias
         if self.local_rep or not self.training:
-            print(np.count_nonzero(self.weights.cpu().detach().numpy()) / np.prod(self.weights.size()))
+            weights = self.weights
+            if self.prune_rate > 0.0:
+                weights = self.prune_weights(self.weights)
+
+            #print("density:", np.count_nonzero(weights.cpu().detach().numpy()) / np.prod(weights.size()))
             output = F.conv2d(
-                input_, self.weights, b, self.stride, self.padding, self.dilation, self.groups
+                input_, weights, b, self.stride, self.padding, self.dilation, self.groups
             )
             z = self.sample_z(output.size(0), sample=self.training)
             return output.mul(z)
