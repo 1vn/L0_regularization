@@ -73,6 +73,7 @@ parser.add_argument("--temp", type=float, default=2.0 / 3.0)
 parser.add_argument("--prune", type=bool, default=False)
 parser.add_argument("--dropout", type=float, default=0.5)
 parser.add_argument("--dropout_botk", type=float, default=0.5)
+parser.add_argument("--dropout_type", type=str, default="weight")
 parser.set_defaults(bottleneck=True)
 parser.set_defaults(augment=True)
 parser.set_defaults(tensorboard=True)
@@ -136,6 +137,7 @@ def main():
             weight_decay=args.weight_decay,
             dropout=args.dropout,
             dropout_botk=args.dropout_botk,
+            dropout_type=args.dropout_type,
         )
 
     print(
@@ -207,7 +209,7 @@ def main():
             model.prune(botk)
             prec1 = validate(val_loader, model, loss_function, 1)
             model.load_state_dict(checkpoint["state_dict"])
-            print(botk, prec1)
+            print(botk, 100 - prec1)
         return
 
     for epoch in range(args.start_epoch, args.epochs):

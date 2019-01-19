@@ -345,7 +345,7 @@ class L0Conv2d(Module):
             if self.prune_rate > 0.0:
                 weights = self.prune_weights(self.weights)
 
-            #print("density:", np.count_nonzero(weights.cpu().detach().numpy()) / np.prod(weights.size()))
+            # print("density:", np.count_nonzero(weights.cpu().detach().numpy()) / np.prod(weights.size()))
             output = F.conv2d(
                 input_, weights, b, self.stride, self.padding, self.dilation, self.groups
             )
@@ -393,6 +393,7 @@ class TDConv2d(Module):
         bias=True,
         dropout=0.5,
         dropout_botk=0.5,
+        dropout_type="weight",
         temperature=2.0 / 3.0,
         weight_decay=1.0,
         lamba=1.0,
@@ -419,6 +420,7 @@ class TDConv2d(Module):
         self.floatTensor = (
             torch.FloatTensor if not torch.cuda.is_available() else torch.cuda.FloatTensor
         )
+        self.prune_rate = 0
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = pair(kernel_size)
@@ -436,6 +438,7 @@ class TDConv2d(Module):
             self.register_parameter("bias", None)
 
         self.dropout = dropout
+        self.dropout_type = dropout_type
         self.dropout_botk = dropout_botk
 
         self.reset_parameters()
@@ -491,45 +494,70 @@ class TDConv2d(Module):
         targ_perc = self.dropout_botk
 
         # print("w_orig: ", w)
+        
+        if self.dropout == 0:
+            return w
 
-        w_shape = w.size()
-        w = w.view(-1, w_shape[-1])
+        if self.dropout_type == "weight":
+            w_shape = w.size()
+            w = w.view(-1, w_shape[-1])
+            norm = w.abs()
+            idx = int(targ_perc * float(w.size()[0]))
+            norm_sorted, _ = norm.sort(dim=0)
+            threshold = norm_sorted[idx]
+            mask = norm < threshold[None, :]
 
-        norm = w.abs()
-        idx = int(targ_perc * float(w.size()[0]))
-        norm_sorted, _ = norm.sort(dim=0)
-        threshold = norm_sorted[idx]
-        mask = norm < threshold[None, :]
+            if not self.training:
+                w = (1.0 - mask.float()) * w
+                w = w.view(w_shape)
+                return w
 
-        if not self.training:
+            cuda0 = torch.device("cuda:0")
+            dropout_mask = torch.rand(w.size(), device=cuda0) < drop_rate
+            mask = dropout_mask & mask
+            w = (1.0 - mask.float()) * w
+            w = w.view(w_shape)
+            return w
+        if self.dropout_type == "unit":
+            print(w)
+            idx = int(targ_perc * float(w.size()[1]))
+            norm = w.norm(p=2, dim=1)
+            norm_sorted, _ = norm.sort()
+            norm_sorted = norm_sorted.view(w.size()[0], 1)
+            print(norm_sorted)
+            threshold = norm_sorted[idx]
+            print(threshold, idx)
+            mask = norm < threshold[None, :]
+            print(mask)
+            mask = mask.tile(w.size()[0], 1)
+
+            dropout_mask = torch.rand(w.size(), device=cuda0) < drop_rate
+            mask = dropout_mask & mask
             w = (1.0 - mask.float()) * w
             w = w.view(w_shape)
             return w
 
-        cuda0 = torch.device("cuda:0")
-        dropout_mask = torch.rand(w.size(), device=cuda0) < drop_rate
-        mask = dropout_mask & mask
-        w = (1.0 - mask.float()) * w
-        w = w.view(w_shape)
-        return w
-
     def prune(self, botk):
-        w = self.weight
+        self.prune_rate = botk
+
+    def prune_weights(self, w):
         w_shape = w.size()
         w = w.view(-1, w_shape[-1])
         norm = w.abs()
-        idx = int(botk * float(w.size()[0]))
+        idx = int(self.prune_rate * float(w.size()[0]))
         norm_sorted, _ = norm.sort(dim=0)
         threshold = norm_sorted[idx : idx + 1]
         mask = norm >= threshold
         w = mask.float() * w
         w = w.view(w_shape)
-        self.weight = torch.nn.Parameter(w)
+        return torch.nn.Parameter(w)
 
     def forward(self, input_):
         if self.input_shape is None:
             self.input_shape = input_.size()
         weight = self.targeted_dropout(self.weight)
+        if self.prune_rate > 0.0:
+            weight = self.prune_weights(weight)
         output = F.conv2d(
             input_, weight, self.bias, self.stride, self.padding, self.dilation, self.groups
         )
