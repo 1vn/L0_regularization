@@ -323,10 +323,10 @@ class L0Conv2d(Module):
         qz_shape = qz.size()
 
         if len(qz_shape) == 4:
-            qz = qz.view(-1, qz_shape[-1])
+            qz = qz.view(qz_shape[-1], -1)
 
-        idx = int(self.prune_rate * float(qz.size()[0]))
-        qz_sorted, _ = qz.sort(dim=0)
+        idx = int(self.prune_rate * float(qz.size()[1]))
+        qz_sorted, _ = qz.sort(dim=1)
         threshold = qz_sorted[idx : idx + 1]
         mask = qz >= threshold
         qz = mask.float() * qz
@@ -497,40 +497,40 @@ class TDConv2d(Module):
         
         if self.dropout == 0:
             return w
-
+        
+        cuda0 = torch.device("cuda:0")
         if self.dropout_type == "weight":
             w_shape = w.size()
-            w = w.view(-1, w_shape[-1])
+            w = w.view(w_shape[0], -1)
             norm = w.abs()
-            idx = int(targ_perc * float(w.size()[0]))
-            norm_sorted, _ = norm.sort(dim=0)
-            threshold = norm_sorted[idx]
-            mask = norm < threshold[None, :]
+            idx = int(targ_perc * float(w.size()[1]))
+            norm_sorted, _ = norm.sort(dim=1)
+            threshold = norm_sorted[:, idx]
+            mask = norm < threshold[:, None]
 
             if not self.training:
                 w = (1.0 - mask.float()) * w
                 w = w.view(w_shape)
                 return w
 
-            cuda0 = torch.device("cuda:0")
             dropout_mask = torch.rand(w.size(), device=cuda0) < drop_rate
             mask = dropout_mask & mask
             w = (1.0 - mask.float()) * w
             w = w.view(w_shape)
             return w
         if self.dropout_type == "unit":
-            print(w)
-            idx = int(targ_perc * float(w.size()[1]))
+            w_shape = w.size()
+            w = w.view(w_shape[0], -1)
+            idx = int(targ_perc * float(w.size()[0]))
             norm = w.norm(p=2, dim=1)
-            norm_sorted, _ = norm.sort()
-            norm_sorted = norm_sorted.view(w.size()[0], 1)
-            print(norm_sorted)
+            norm_sorted, _ = norm.sort(dim=0)
+            #print("norm_sorted:", norm_sorted)
             threshold = norm_sorted[idx]
-            print(threshold, idx)
-            mask = norm < threshold[None, :]
-            print(mask)
-            mask = mask.tile(w.size()[0], 1)
-
+            #print("thresh:", threshold)
+            mask = norm < threshold
+            #print("mask:", mask, mask.size())
+            mask = mask.repeat(1, w.size()[1]).view(w.size()[0], -1)
+            #print(mask.size(), w.size(), "yolo")
             dropout_mask = torch.rand(w.size(), device=cuda0) < drop_rate
             mask = dropout_mask & mask
             w = (1.0 - mask.float()) * w
